@@ -1,0 +1,6 @@
+{
+    "sketch": "siggen.ino",
+    "output": "build",
+    "board": "arduino:avr:uno",
+    "port": "COM7"
+}
