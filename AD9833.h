@@ -121,6 +121,8 @@ public:
 	// Return frequency resolution 
 	float GetResolution ( void );
 
+	WaveformType GetWaveForm( Registers waveFormReg );
+
 private:
 
 	void 			WriteRegister ( int16_t dat );

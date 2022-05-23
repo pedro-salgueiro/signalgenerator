@@ -362,3 +362,9 @@ void AD9833 :: WriteRegister ( int16_t dat ) {
 	WRITE_FNCPIN(HIGH);		// Write done
 }
 
+WaveformType AD9833 :: GetWaveForm( Registers waveFormReg ) {
+	if ( waveFormReg == REG0 )
+		return (WaveformType)waveForm0;
+	else
+		return (WaveformType) waveForm1;
+}

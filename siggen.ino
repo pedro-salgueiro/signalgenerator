@@ -2,7 +2,7 @@
 // Include
 
 // ads
-#include "AD9833.h" 
+#include "AD9833.h"
 // lcd
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_pinIO.h> // Arduino pin i/o class header
@@ -10,154 +10,307 @@
 void lcd_setup(void);
 void lcd_loop();
 
+byte ads_get_wave(void);
+void ads_toggle_wave(void);
+byte ads_get_scale();
+void ads_toggle_scale(void);
+void ads_set_delta(long d);
+void ads_clear_delta();
+long ads_get_frequency();
 void ads_setup(void);
 void ads_loop(void);
 
 void encoder_setup(void);
 void encoder_loop(void);
 
-const int rs = 8, en = 10, db4 = 4, db5 = 5, db6 = 6, db7 = 7;
-hd44780_pinIO lcd(rs, en, db4, db5, db6, db7);
-const int LCD_COLS = 8;
-const int LCD_ROWS = 2;
-
-const int FNC_PIN = 9;
-AD9833 gen(FNC_PIN);
-
-
-const int encoderPinA = 2; // right
-const int encoderPinB = 3; // left
-
-volatile unsigned int encoderPos = 0; // a counter for the dial
-volatile long currentFrequency = 50000;
-unsigned int lastReportedPos = 1; // change management
-static boolean rotating = false;  // debounce management
-
-// interrupt service routine vars
-boolean A_set = false;
-boolean B_set = false;
+void buttons_setup(void);
+void buttons_loop(void);
 
 const int F_HZ = 0;
 const int F_KHZ = 1;
 const int F_MHZ = 2;
 
-const int freqUnitPin = A0;
-int freqUnitPinState = LOW;
-int freqUnit = F_HZ;
 
-const int waveShapePin = A1;
-int waveShapeState = LOW;
-
-const int atnPin = A2;
-int atnPinState = LOW;
-
-int buttonState = 0; // current state of the button
+const int W_SIN = 0;
+const int W_SQR = 1;
+const int W_TRI = 2;
 
 void setup()
+{
+
+    lcd_setup();
+    encoder_setup();
+    ads_setup();
+    buttons_setup();
+
+    Serial.begin(9600); // output
+    Serial.println("Signal Gen 1.00");
+}
+
+void loop()
+{
+    lcd_loop();
+    encoder_loop();
+    ads_loop();
+    buttons_loop();
+}
+
+// TODO: Move these to modules but lets get these working first
+
+///////////////////////////////////////////////////////////////////////////////
+// LCD
+///////////////////////////////////////////////////////////////////////////////
+
+const int rs = 8, en = 10, db4 = 4, db5 = 5, db6 = 6, db7 = 7;
+const int LCD_COLS = 8;
+const int LCD_ROWS = 2;
+hd44780_pinIO lcd(rs, en, db4, db5, db6, db7);
+
+char last_reported_f[14];
+
+void lcd_setup(void)
+{
+    memset(last_reported_f, '\0', 14);
+    lcd.begin(LCD_COLS, LCD_ROWS);
+    lcd.lineWrap();
+    lcd.print("Signal Gen 1.00");
+}
+
+void lcd_loop()
+{
+    long f = ads_get_frequency();
+    
+    // nothing    
+    char frequencyText[14];
+    memset(frequencyText, '\0', 14);
+    dtostrf(f, 9, 0, frequencyText);
+
+    byte scale = ads_get_scale();
+    char scale_letter;
+
+    switch (scale)
+    {
+    case F_HZ:
+        scale_letter = ' ';
+        break;
+    
+    case F_KHZ:
+        scale_letter = 'K';
+        break;
+
+    case F_MHZ:
+        scale_letter = 'M';
+        break;
+
+    default:
+        scale_letter = '?'; // should never happen, just in case...
+        break;
+    }
+
+    char wave_letter;
+    byte wave = ads_get_wave();
+    switch (wave)
+    {
+    case W_SIN:
+        wave_letter = 'S';
+        break;
+    
+    case W_SQR:
+        wave_letter = 'Q';
+        break;
+
+    case W_TRI:
+        wave_letter = 'T';
+        break;
+
+    default:
+        wave_letter = '?'; // should never happen, just in case...
+        break;
+    }
+
+    char lcdText[20];
+    sprintf(lcdText, "%s %c%c", frequencyText, scale_letter, wave_letter);
+
+    if(strcmp(last_reported_f, lcdText)==0)
+    {
+        return;
+    }
+
+    char buffer[40];
+    sprintf(buffer, "New frequency %s", lcdText);
+    Serial.println(buffer);
+    
+    lcd.clear();
+    lcd.home();
+    lcd.print(lcdText);
+
+    strcpy(last_reported_f, lcdText);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// ADS Chip
+///////////////////////////////////////////////////////////////////////////////
+
+volatile long currentFrequency = 50000;
+volatile byte currentScale = F_HZ;
+volatile byte currentWave = W_SIN;
+volatile long delta = 0;
+bool delta_lock = 0;
+
+const int FNC_PIN = 9;
+AD9833 gen(FNC_PIN);
+
+void ads_toggle_wave(void)
+{
+    currentWave ++;
+
+    if(currentWave > W_TRI)
+    {
+        currentWave = W_SIN;
+    }
+}
+
+byte ads_get_scale(void)
+{
+    return currentScale;
+}
+
+byte ads_get_wave(void)
+{
+    return currentWave;
+}
+
+void ads_toggle_scale(void)
+{
+    currentScale++;
+    if(currentScale > F_MHZ)
+    {
+        currentScale = F_HZ;
+    }
+}
+
+void ads_set_delta(long d)
+{
+    delta = d;
+    delta_lock = 1;
+}
+
+long ads_get_frequency(void)
+{
+    return currentFrequency;
+}
+
+void ads_clear_delta(void)
+{
+    delta = 0;
+    delta_lock = 0;
+}
+
+bool can_set_delta(void)
+{
+    return !delta_lock;
+}
+
+void ads_setup(void)
+{
+    gen.Begin();
+    gen.ApplySignal(SINE_WAVE, REG0, currentFrequency);
+    gen.EnableOutput(true);
+}
+
+void ads_loop(void)
+{
+    // detect if we have to change the frequency
+
+    long scale;
+
+    switch (currentScale)
+    {
+    case F_HZ:
+        scale = 1;
+        break;
+    case F_KHZ:
+        scale = 1000;
+        break;
+    case F_MHZ:
+        scale = 1000000;
+        break;
+    default:
+        break;
+    }
+
+    currentFrequency += delta * scale;
+    ads_clear_delta();
+    gen.SetFrequency(REG0, currentFrequency);  
+
+    WaveformType w = gen.GetWaveForm(REG0);
+
+    WaveformType ours;
+
+    switch (currentWave)
+    {
+    case W_SIN:
+        ours = WaveformType::SINE_WAVE;
+        break;
+    case W_SQR:
+        ours = WaveformType::SQUARE_WAVE;
+        break;
+    case W_TRI:
+        ours = WaveformType::TRIANGLE_WAVE;
+        break;
+    default:
+        ours = WaveformType::SINE_WAVE; // sines are just more perfect :)
+        break;
+    }
+
+    if(ours != w)
+    {
+        gen.SetWaveform(REG0, ours);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Rotary Encoder
+///////////////////////////////////////////////////////////////////////////////
+
+const int encoderPinA = 2; // right
+const int encoderPinB = 3; // left
+
+volatile long encoderPos = 0; 
+long lastReportedPos = 1;     
+static boolean rotating = false;
+
+// interrupt service routine vars
+boolean A_set = false;
+boolean B_set = false;
+
+void encoder_setup(void)
 {
     pinMode(encoderPinA, INPUT);
     pinMode(encoderPinB, INPUT);
 
-    pinMode(freqUnitPin, INPUT);
-    pinMode(waveShapePin, INPUT);
-    pinMode(atnPin, INPUT);
-
     digitalWrite(encoderPinA, HIGH);
     digitalWrite(encoderPinB, HIGH);
-    
+
     attachInterrupt(0, doEncoderA, CHANGE);
     attachInterrupt(1, doEncoderB, CHANGE);
-
-    gen.Begin();
-    gen.ApplySignal(SINE_WAVE, REG0, currentFrequency);
-    gen.EnableOutput(true);
-
-    Serial.begin(9600); // output
-
-    lcd.begin(LCD_COLS, LCD_ROWS);
-    lcd.lineWrap();
-    lcd.print("Signal Gen 1.00");
-
-    Serial.println("Signal Gen 1.00");
 }
 
-int wasLow = 0;
-
-void loop()
-{    
-
+void encoder_loop(void)
+{
     rotating = true; // reset the debouncer
 
     if (lastReportedPos != encoderPos)
     {
-        lastReportedPos = encoderPos;
-        
-            long scale;
-
-            switch (freqUnit)
-            {
-            case F_HZ:
-                scale = 1;
-                break;
-            case F_KHZ:
-                scale = 1000;
-                break;
-            case F_MHZ:
-                scale = 1000000;
-                break;
-            default:
-                break;
-            }
-
-            currentFrequency += lastReportedPos * scale;
-            lastReportedPos = 0;
-            encoderPos=0;
-
-            char buffer[40];
-            char frequencyText[14];
-            memset(frequencyText, '\0', 14);
-            dtostrf(currentFrequency, 10, 1, frequencyText);
-            sprintf(buffer, "New frequency %s", frequencyText);
-            Serial.println(buffer);
-            gen.SetFrequency(REG0, currentFrequency);
-            lcd.clear();
-            lcd.home();
-            lcd.print(frequencyText);
-        
-    }
-
-    buttonState = digitalRead(freqUnitPin);
-    
-    if(buttonState == LOW)
-    {        
-        if(wasLow == 0)
+        // push the delta into the frequency
+        if(can_set_delta())
         {
-            Serial.println("Low");
+            long dif = encoderPos - lastReportedPos;
+            ads_set_delta(dif);
+            Serial.println(dif);            
+            lastReportedPos = encoderPos;
         }
-
-        wasLow = 1;
     }
-    else if(buttonState == HIGH)
-    {
-        wasLow = 0;
-        Serial.println("High");
-    }
-    
-    if (buttonState != freqUnitPinState)
-    {        
-        if (buttonState == HIGH)
-        {            
-            freqUnit++;
-            if(freqUnit > F_MHZ)
-            {
-                freqUnit = F_HZ;
-            }
-        }
-
-        delay(50);
-    }
-
-    freqUnitPinState = buttonState;
 }
 
 // Interrupt on A changing state
@@ -196,44 +349,50 @@ void doEncoderB()
     }
 }
 
-// TODO: Move these to modules but lets get these working first
-
 ///////////////////////////////////////////////////////////////////////////////
-// LCD
+// Buttons
 ///////////////////////////////////////////////////////////////////////////////
 
-void lcd_setup(void)
+const int freqUnitPin = A0;
+int freqUnitPinState = LOW;
+
+const int waveShapePin = A1;
+int waveShapeState = LOW;
+
+const int atnPin = A2;
+int atnPinState = LOW;
+
+int buttonState = 0; // current state of the button
+
+void buttons_setup(void)
 {
-
+    pinMode(freqUnitPin, INPUT);
+    pinMode(waveShapePin, INPUT);
+    pinMode(atnPin, INPUT);
 }
 
-void lcd_loop()
+void buttons_loop(void)
 {
+    buttonState = digitalRead(freqUnitPin);    
 
-}
+    if (buttonState != freqUnitPinState)
+    {
+        if (buttonState == HIGH)
+        {
+            ads_toggle_scale();
+        }
 
-///////////////////////////////////////////////////////////////////////////////
-// ADS Chip
-///////////////////////////////////////////////////////////////////////////////
-void ads_setup(void)
-{
+        freqUnitPinState = buttonState;
+    }    
 
-}
+    buttonState = digitalRead(waveShapePin);
+    if (buttonState != waveShapeState)
+    {
+        if (buttonState == HIGH)
+        {
+            ads_toggle_wave();
+        }
 
-void ads_loop(void)
-{
-
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Rotary Encoder
-///////////////////////////////////////////////////////////////////////////////
-void encoder_setup(void)
-{
-
-}
-
-void encoder_loop(void)
-{
-
+        waveShapeState = buttonState;
+    }   
 }
