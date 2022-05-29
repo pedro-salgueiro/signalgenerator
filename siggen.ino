@@ -1,4 +1,3 @@
-
 // Include
 
 // ads
@@ -6,6 +5,11 @@
 // lcd
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_pinIO.h> // Arduino pin i/o class header
+
+#define APP_NAME "Signal Gen"
+#define APP_VERSION "1.00"
+
+#define VERBOSE 0
 
 void lcd_setup(void);
 void lcd_loop();
@@ -26,9 +30,13 @@ void encoder_loop(void);
 void buttons_setup(void);
 void buttons_loop(void);
 
-const int F_HZ = 0;
-const int F_KHZ = 1;
-const int F_MHZ = 2;
+const int F_x1HZ = 0;
+const int F_x10HZ = 1;
+const int F_x100HZ = 2;
+const int F_x1KHZ = 3;
+const int F_x10KHZ = 4;
+const int F_x100KHZ = 5;
+const int F_x1MHZ = 6;
 
 const int W_SIN = 0;
 const int W_SQR = 1;
@@ -42,7 +50,7 @@ void setup()
     ads_setup();
     buttons_setup();
 
-    Serial.begin(9600); // output
+    Serial.begin(115200); // output
     Serial.println("Signal Gen 1.00");
 }
 
@@ -51,7 +59,7 @@ void loop()
     lcd_loop();
     encoder_loop();
     ads_loop();
-    buttons_loop();
+    buttons_loop();    
 }
 
 // TODO: Move these to modules but lets get these working first
@@ -69,7 +77,7 @@ char last_reported_f[14];
 
 void lcd_setup(void)
 {
-    memset(last_reported_f, '\0', 14);
+    memset(last_reported_f, '\0', sizeof(last_reported_f));
     lcd.begin(LCD_COLS, LCD_ROWS);
     lcd.lineWrap();
     lcd.print("Signal Gen 1.00");
@@ -80,29 +88,47 @@ void lcd_loop()
     long f = ads_get_frequency();
 
     // nothing
-    char frequencyText[14];
-    memset(frequencyText, '\0', 14);
-    dtostrf(f, 9, 0, frequencyText);
+    char frequencyText[20];
+    memset(frequencyText, '\0', sizeof(frequencyText));
+    dtostrf(f, 7, 0, frequencyText);
 
     byte scale = ads_get_scale();
-    char scale_letter;
+
+    char scale_text[10];
+    memset(scale_text, '\0', sizeof(scale_text));
 
     switch (scale)
     {
-    case F_HZ:
-        scale_letter = ' ';
+    case F_x1HZ:
+        strncpy(scale_text, "      ", sizeof(scale_text));
         break;
 
-    case F_KHZ:
-        scale_letter = 'K';
+    case F_x10HZ:
+        strncpy(scale_text, "   x10", sizeof(scale_text));
         break;
 
-    case F_MHZ:
-        scale_letter = 'M';
+    case F_x100HZ:
+        strncpy(scale_text, "  x100", sizeof(scale_text));
+        break;
+
+    case F_x1KHZ:
+        strncpy(scale_text, "   Khz", sizeof(scale_text));
+        break;
+
+    case F_x10KHZ:
+        strncpy(scale_text, "  x10K", sizeof(scale_text));
+        break;
+
+    case F_x100KHZ:
+        strncpy(scale_text, " x100K", sizeof(scale_text));
+        break;
+
+    case F_x1MHZ:
+        strncpy(scale_text, "   Mhz", sizeof(scale_text));
         break;
 
     default:
-        scale_letter = '?'; // should never happen, just in case...
+        strncpy(scale_text, "     ?", sizeof(scale_text)); // should never happen, just in case...
         break;
     }
 
@@ -127,23 +153,21 @@ void lcd_loop()
         break;
     }
 
-    char lcdText[20];
-    sprintf(lcdText, "%s %c%c", frequencyText, scale_letter, wave_letter);
+    char lcdText[40];
+    memset(lcdText, '\0', sizeof(lcdText));
+    sprintf(lcdText, "%s %s", frequencyText, scale_text);
 
-    if (strcmp(last_reported_f, lcdText) == 0)
+    if (strncmp(last_reported_f, lcdText, sizeof(last_reported_f)) == 0)
     {
         return;
-    }
-
-    char buffer[40];
-    sprintf(buffer, "New frequency %s", lcdText);
-    Serial.println(buffer);
-
+    }    
+    
     lcd.clear();
     lcd.home();
     lcd.print(lcdText);
 
-    strcpy(last_reported_f, lcdText);
+    memset(last_reported_f, '\0', sizeof(last_reported_f));
+    strncpy(last_reported_f, lcdText, sizeof(last_reported_f));    
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -151,7 +175,7 @@ void lcd_loop()
 ///////////////////////////////////////////////////////////////////////////////
 
 volatile long currentFrequency = 50000;
-volatile byte currentScale = F_HZ;
+volatile byte currentScale = F_x1HZ;
 volatile byte currentWave = W_SIN;
 volatile long delta = 0;
 bool delta_lock = 0;
@@ -182,9 +206,9 @@ byte ads_get_wave(void)
 void ads_toggle_scale(void)
 {
     currentScale++;
-    if (currentScale > F_MHZ)
+    if (currentScale > F_x1MHZ)
     {
-        currentScale = F_HZ;
+        currentScale = F_x1HZ;
     }
 }
 
@@ -227,22 +251,65 @@ void ads_loop(void)
 
         switch (currentScale)
         {
-        case F_HZ:
+        case F_x1HZ:
             scale = 1;
             break;
-        case F_KHZ:
+
+        case F_x10HZ:
+            scale = 10;
+            break;
+
+        case F_x100HZ:
+            scale = 100;
+            break;
+
+        case F_x1KHZ:
             scale = 1000;
             break;
-        case F_MHZ:
+
+        case F_x10KHZ:
+            scale = 10000;
+            break;
+
+        case F_x100KHZ:
+            scale = 100000;
+            break;
+
+        case F_x1MHZ:
             scale = 1000000;
             break;
+
         default:
             break;
         }
 
+        if(VERBOSE)
+        {
+            Serial.println("Adjusting frequency");
+            Serial.print("Previous frequency: ");
+            Serial.println(currentFrequency);
+            Serial.print("Delta: ");
+            Serial.println(delta);
+        }
+
         currentFrequency += delta * scale;
+
+        if(VERBOSE)
+        {            
+            Serial.print("New frequency: ");
+            Serial.println(currentFrequency);
+        }
+
         ads_clear_delta();
-        gen.SetFrequency(REG0, (float)currentFrequency);
+        float converted_freq = (float)currentFrequency;
+
+        if(VERBOSE)
+        {            
+            Serial.print("New frequency (float): ");
+            Serial.println(converted_freq);
+        }
+
+        gen.SetFrequency(REG0, converted_freq);
     }
 
     WaveformType w = gen.GetWaveForm(REG0);
@@ -278,7 +345,7 @@ void ads_loop(void)
 const int encoderPinA = 2; // right
 const int encoderPinB = 3; // left
 
-volatile long encoderPos = 0;
+volatile long encoderPos = 1;
 long lastReportedPos = 1;
 static boolean rotating = false;
 
@@ -301,7 +368,7 @@ void encoder_setup(void)
 void encoder_loop(void)
 {
     rotating = true; // reset the debouncer
-
+   
     if (lastReportedPos != encoderPos)
     {
         // push the delta into the frequency
@@ -309,8 +376,17 @@ void encoder_loop(void)
         {
             long dif = encoderPos - lastReportedPos;
             ads_set_delta(dif);
-            Serial.println(dif);
+            if(VERBOSE)
+            {
+                Serial.print("Detected encoder change: ");
+                Serial.println(dif);
+            }
+            
             lastReportedPos = encoderPos;
+        }
+        else if(VERBOSE)
+        {
+            Serial.print("Waiting to set delta");                
         }
     }
 }
@@ -329,7 +405,9 @@ void doEncoderA()
 
         // adjust counter + if A leads B
         if (A_set && !B_set)
+        {
             encoderPos += 1;
+        }
 
         rotating = false; // no more debouncing until loop() hits again
     }
@@ -345,7 +423,9 @@ void doEncoderB()
         B_set = !B_set;
         //  adjust counter - 1 if B leads A
         if (B_set && !A_set)
+        {
             encoderPos -= 1;
+        }
 
         rotating = false;
     }
