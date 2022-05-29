@@ -30,7 +30,6 @@ const int F_HZ = 0;
 const int F_KHZ = 1;
 const int F_MHZ = 2;
 
-
 const int W_SIN = 0;
 const int W_SQR = 1;
 const int W_TRI = 2;
@@ -79,8 +78,8 @@ void lcd_setup(void)
 void lcd_loop()
 {
     long f = ads_get_frequency();
-    
-    // nothing    
+
+    // nothing
     char frequencyText[14];
     memset(frequencyText, '\0', 14);
     dtostrf(f, 9, 0, frequencyText);
@@ -93,7 +92,7 @@ void lcd_loop()
     case F_HZ:
         scale_letter = ' ';
         break;
-    
+
     case F_KHZ:
         scale_letter = 'K';
         break;
@@ -114,7 +113,7 @@ void lcd_loop()
     case W_SIN:
         wave_letter = 'S';
         break;
-    
+
     case W_SQR:
         wave_letter = 'Q';
         break;
@@ -131,7 +130,7 @@ void lcd_loop()
     char lcdText[20];
     sprintf(lcdText, "%s %c%c", frequencyText, scale_letter, wave_letter);
 
-    if(strcmp(last_reported_f, lcdText)==0)
+    if (strcmp(last_reported_f, lcdText) == 0)
     {
         return;
     }
@@ -139,7 +138,7 @@ void lcd_loop()
     char buffer[40];
     sprintf(buffer, "New frequency %s", lcdText);
     Serial.println(buffer);
-    
+
     lcd.clear();
     lcd.home();
     lcd.print(lcdText);
@@ -157,14 +156,14 @@ volatile byte currentWave = W_SIN;
 volatile long delta = 0;
 bool delta_lock = 0;
 
-const int FNC_PIN = 9;
+#define FNC_PIN 9
 AD9833 gen(FNC_PIN);
 
 void ads_toggle_wave(void)
 {
-    currentWave ++;
+    currentWave++;
 
-    if(currentWave > W_TRI)
+    if (currentWave > W_TRI)
     {
         currentWave = W_SIN;
     }
@@ -183,7 +182,7 @@ byte ads_get_wave(void)
 void ads_toggle_scale(void)
 {
     currentScale++;
-    if(currentScale > F_MHZ)
+    if (currentScale > F_MHZ)
     {
         currentScale = F_HZ;
     }
@@ -214,7 +213,7 @@ bool can_set_delta(void)
 void ads_setup(void)
 {
     gen.Begin();
-    gen.ApplySignal(SINE_WAVE, REG0, currentFrequency);
+    gen.ApplySignal(SINE_WAVE, REG0, (float)currentFrequency);
     gen.EnableOutput(true);
 }
 
@@ -222,26 +221,29 @@ void ads_loop(void)
 {
     // detect if we have to change the frequency
 
-    long scale;
-
-    switch (currentScale)
+    if (delta != 0)
     {
-    case F_HZ:
-        scale = 1;
-        break;
-    case F_KHZ:
-        scale = 1000;
-        break;
-    case F_MHZ:
-        scale = 1000000;
-        break;
-    default:
-        break;
-    }
+        long scale;
 
-    currentFrequency += delta * scale;
-    ads_clear_delta();
-    gen.SetFrequency(REG0, currentFrequency);  
+        switch (currentScale)
+        {
+        case F_HZ:
+            scale = 1;
+            break;
+        case F_KHZ:
+            scale = 1000;
+            break;
+        case F_MHZ:
+            scale = 1000000;
+            break;
+        default:
+            break;
+        }
+
+        currentFrequency += delta * scale;
+        ads_clear_delta();
+        gen.SetFrequency(REG0, (float)currentFrequency);
+    }
 
     WaveformType w = gen.GetWaveForm(REG0);
 
@@ -263,7 +265,7 @@ void ads_loop(void)
         break;
     }
 
-    if(ours != w)
+    if (ours != w)
     {
         gen.SetWaveform(REG0, ours);
     }
@@ -276,8 +278,8 @@ void ads_loop(void)
 const int encoderPinA = 2; // right
 const int encoderPinB = 3; // left
 
-volatile long encoderPos = 0; 
-long lastReportedPos = 1;     
+volatile long encoderPos = 0;
+long lastReportedPos = 1;
 static boolean rotating = false;
 
 // interrupt service routine vars
@@ -303,11 +305,11 @@ void encoder_loop(void)
     if (lastReportedPos != encoderPos)
     {
         // push the delta into the frequency
-        if(can_set_delta())
+        if (can_set_delta())
         {
             long dif = encoderPos - lastReportedPos;
             ads_set_delta(dif);
-            Serial.println(dif);            
+            Serial.println(dif);
             lastReportedPos = encoderPos;
         }
     }
@@ -373,7 +375,7 @@ void buttons_setup(void)
 
 void buttons_loop(void)
 {
-    buttonState = digitalRead(freqUnitPin);    
+    buttonState = digitalRead(freqUnitPin);
 
     if (buttonState != freqUnitPinState)
     {
@@ -383,7 +385,7 @@ void buttons_loop(void)
         }
 
         freqUnitPinState = buttonState;
-    }    
+    }
 
     buttonState = digitalRead(waveShapePin);
     if (buttonState != waveShapeState)
@@ -394,5 +396,5 @@ void buttons_loop(void)
         }
 
         waveShapeState = buttonState;
-    }   
+    }
 }
